@@ -3,7 +3,7 @@ from __future__ import annotations
 from langgraph.graph import StateGraph, START, END
 from typing import TypedDict, Annotated, Any, Dict, Optional
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage,AIMessage
-from langgraph_checkpoint.sqlite import SqliteSaver
+from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
 from langchain_community.tools import DuckDuckGoSearchRun
@@ -450,8 +450,22 @@ def final_answer(state: ChatState, config=None):
 # -------------------
 # Checkpointer
 # -------------------
-conn = sqlite3.connect(database="chatbot.db", check_same_thread=False)
-checkpointer = SqliteSaver(conn=conn)
+# -------------------
+# Checkpointer (LOCAL = SQLite, CLOUD = Memory)
+# -------------------
+
+USE_SQLITE = os.getenv("USE_SQLITE", "false").lower() == "true"
+
+if USE_SQLITE:
+    # ✅ Local development (persistent)
+    from langgraph.checkpoint.sqlite import SqliteSaver
+    conn = sqlite3.connect("chatbot.db", check_same_thread=False)
+    checkpointer = SqliteSaver(conn=conn)
+else:
+    # ✅ Streamlit Cloud (safe, in-memory)
+    from langgraph.checkpoint import MemorySaver
+    checkpointer = MemorySaver()
+
 
 # -------------------
 # Graph
@@ -549,5 +563,3 @@ def delete_thread(thread_id: str):
         )
 
         conn.commit()
-
-
