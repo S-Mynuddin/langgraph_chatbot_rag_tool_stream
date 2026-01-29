@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.env
+chatbot.db
+vectorstores_global/
+.DS_Store
