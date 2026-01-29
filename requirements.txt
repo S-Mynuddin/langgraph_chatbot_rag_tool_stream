@@ -1,5 +1,7 @@
 streamlit
-langgraph
+langgraph>=1.0.7
+langgraph-checkpoint>=4.0.0
+langgraph-prebuilt>=1.0.7
 langchain
 langchain-community
 langchain-core
@@ -12,3 +14,4 @@ pypdf
 python-dotenv
 requests
 pydantic
+
