@@ -465,7 +465,7 @@ if USE_SQLITE:
     checkpointer = SqliteSaver(conn=conn)
 else:
     # Streamlit Cloud (safe, stateless)
-    from langgraph.checkpoint import MemorySaver
+    from langgraph.checkpoint.memory import MemorySaver
     checkpointer = MemorySaver()
 
 # -------------------
@@ -550,3 +550,4 @@ def delete_thread(thread_id: str):
             (thread_id,)
         )
         conn.commit()
+
