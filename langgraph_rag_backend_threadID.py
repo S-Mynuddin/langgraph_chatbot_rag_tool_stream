@@ -3,7 +3,6 @@ from __future__ import annotations
 from langgraph.graph import StateGraph, START, END
 from typing import TypedDict, Annotated, Any, Dict, Optional
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage,AIMessage
-from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
 from langchain_community.tools import DuckDuckGoSearchRun
@@ -20,6 +19,8 @@ from langchain_groq import ChatGroq
 import os
 import sqlite3
 import requests
+from threading import Lock
+
 
 # ************************************************************************
 # ==================== Streamlit-safe secrets ====================
@@ -451,21 +452,21 @@ def final_answer(state: ChatState, config=None):
 # Checkpointer
 # -------------------
 # -------------------
+# -------------------
 # Checkpointer (LOCAL = SQLite, CLOUD = Memory)
 # -------------------
 
 USE_SQLITE = os.getenv("USE_SQLITE", "false").lower() == "true"
 
 if USE_SQLITE:
-    # ✅ Local development (persistent)
+    # Local development (persistent)
     from langgraph.checkpoint.sqlite import SqliteSaver
     conn = sqlite3.connect("chatbot.db", check_same_thread=False)
     checkpointer = SqliteSaver(conn=conn)
 else:
-    # ✅ Streamlit Cloud (safe, in-memory)
+    # Streamlit Cloud (safe, stateless)
     from langgraph.checkpoint import MemorySaver
     checkpointer = MemorySaver()
-
 
 # -------------------
 # Graph
@@ -513,16 +514,11 @@ chatbot = graph.compile(checkpointer=checkpointer)
 # -------------------
 
 def retrieve_all_threads():
-    """
-    Return thread_ids ordered by most recent activity (newest first).
-    Schema-safe: reads from SQLite directly (no dependency on checkpoint.config).
-    Works even if some rows have NULL/ missing timestamps.
-    """
+    if not USE_SQLITE:
+        return []  # Cloud: no persistence
+
     with sqlite3.connect("chatbot.db", check_same_thread=False) as conn:
         cur = conn.cursor()
-
-        # Prefer created_at if present; otherwise fall back to metadata->ts if present; else 0
-        # This query is defensive across schema/version differences.
         cur.execute("""
             SELECT
                 thread_id,
@@ -535,31 +531,22 @@ def retrieve_all_threads():
             GROUP BY thread_id
             ORDER BY last_seen DESC
         """)
-
         rows = cur.fetchall()
 
-    if not rows:
-        return []
-
     return [thread_id for thread_id, _ in rows]
-
 
 
 def thread_document_metadata(thread_id: str = "") -> dict:
     return _load_global_meta() or {}
 
 def delete_thread(thread_id: str):
-    """
-    Delete all checkpoints for a given thread_id.
-    Compatible with current LangGraph SQLite schema.
-    """
+    if not USE_SQLITE:
+        return  # Cloud: nothing to delete
+
     with sqlite3.connect("chatbot.db", check_same_thread=False) as conn:
         cur = conn.cursor()
-
-        # ✅ Correct column name
         cur.execute(
             "DELETE FROM checkpoints WHERE thread_id = ?",
             (thread_id,)
         )
-
         conn.commit()
