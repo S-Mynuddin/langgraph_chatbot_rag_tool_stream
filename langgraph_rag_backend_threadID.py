@@ -61,12 +61,9 @@ if not ALPHAVANTAGE_API_KEY:
 DATABASE_URL = get_secret("DATABASE_URL")
 
 if not DATABASE_URL:
-    raise RuntimeError(
-        "❌ DATABASE_URL missing. Add it to environment or Streamlit secrets."
-    )
+    raise RuntimeError("❌ DATABASE_URL missing.")
 
-
-# Force SQLAlchemy to use psycopg v3 driver
+# Switch to psycopg v3 driver
 if DATABASE_URL.startswith("postgresql://"):
     DATABASE_URL = DATABASE_URL.replace(
         "postgresql://",
@@ -74,7 +71,15 @@ if DATABASE_URL.startswith("postgresql://"):
         1
     )
 
+# Fix Supabase SSL parameter for psycopg v3
+if "sslmode=require" in DATABASE_URL:
+    DATABASE_URL = DATABASE_URL.replace(
+        "sslmode=require",
+        "ssl=require"
+    )
+
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+
 
 
 if st is not None:
@@ -594,6 +599,7 @@ def delete_thread(thread_id: str):
             text("DELETE FROM checkpoints WHERE thread_id = :tid"),
             {"tid": thread_id}
         )
+
 
 
 
