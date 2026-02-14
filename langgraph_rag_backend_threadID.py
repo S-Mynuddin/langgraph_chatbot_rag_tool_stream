@@ -58,10 +58,6 @@ if not ALPHAVANTAGE_API_KEY:
     print("⚠️ ALPHAVANTAGE_API_KEY missing — stock tool may fail.")
 
 
-# ==================== Postgres Checkpointer ====================
-
-# ==================== Postgres Checkpointer ====================
-
 DATABASE_URL = get_secret("DATABASE_URL")
 
 if not DATABASE_URL:
@@ -77,15 +73,11 @@ if DATABASE_URL.startswith("postgresql://"):
         1
     )
 
-# Remove ?sslmode=require if present
-clean_url = DATABASE_URL.split("?")[0]
-
+# Just create engine directly — DO NOT modify SSL
 engine = create_engine(
-    clean_url,
-    pool_pre_ping=True,
-    connect_args={"sslmode": "require"}
+    DATABASE_URL,
+    pool_pre_ping=True
 )
-
 
 
 if st is not None:
@@ -605,6 +597,7 @@ def delete_thread(thread_id: str):
             text("DELETE FROM checkpoints WHERE thread_id = :tid"),
             {"tid": thread_id}
         )
+
 
 
 
