@@ -4,3 +4,5 @@ __pycache__/
 chatbot.db
 vectorstores_global/
 .DS_Store
+.streamlit/
+!.streamlit/  # We'll need this for secrets.toml locally
