@@ -5,7 +5,6 @@ import uuid
 from langgraph_rag_backend_threadID import delete_thread
 
 
-
 # **************************************** utility functions *************************
 
 def generate_thread_id():
@@ -265,4 +264,5 @@ if selected_thread:
     st.session_state["message_history"] = temp_messages
     
     st.rerun()
+
 
