@@ -88,24 +88,27 @@ engine = create_engine(
     pool_recycle=3600  # Recycle connections after 1 hour
 )
 
-# ==================== Postgres Checkpointer (Fixed for Streamlit Cloud) ====================
+# ==================== Postgres Checkpointer (Corrected for Streamlit Cloud) ====================
+
+from langgraph.checkpoint.postgres import PostgresSaver
+import psycopg
+from psycopg_pool import ConnectionPool
 
 if has_streamlit:
     @st.cache_resource(show_spinner=False)
     def get_checkpointer():
         """Get or create the Postgres checkpointer with proper connection handling"""
         try:
-            # Create connection pool
-            connection_kwargs = {
-                "autocommit": True,
-                "prepare_threshold": 0,
-            }
-            
-            # Initialize checkpointer
-            checkpointer = PostgresSaver.from_conn_string(
-                DATABASE_URL,
-                connection_kwargs=connection_kwargs
+            # Create a connection pool
+            pool = ConnectionPool(
+                conninfo=DATABASE_URL,
+                min_size=1,
+                max_size=5,
+                kwargs={"autocommit": True}
             )
+            
+            # Initialize checkpointer with the pool
+            checkpointer = PostgresSaver(pool)
             
             # Setup tables if they don't exist
             checkpointer.setup()
@@ -119,17 +122,20 @@ else:
     def get_checkpointer():
         """Fallback for non-Streamlit environments"""
         try:
-            connection_kwargs = {
-                "autocommit": True,
-                "prepare_threshold": 0,
-            }
-            
-            checkpointer = PostgresSaver.from_conn_string(
-                DATABASE_URL,
-                connection_kwargs=connection_kwargs
+            # Create a connection pool
+            pool = ConnectionPool(
+                conninfo=DATABASE_URL,
+                min_size=1,
+                max_size=5,
+                kwargs={"autocommit": True}
             )
             
+            # Initialize checkpointer with the pool
+            checkpointer = PostgresSaver(pool)
+            
+            # Setup tables if they don't exist
             checkpointer.setup()
+            
             return checkpointer
             
         except Exception as e:
@@ -138,8 +144,6 @@ else:
 
 # Get the checkpointer (cached for Streamlit, regular for others)
 checkpointer = get_checkpointer()
-
-
 
 
 # ==================== LLM ====================
@@ -642,3 +646,4 @@ def delete_thread(thread_id: str):
             text("DELETE FROM checkpoints WHERE thread_id = :tid"),
             {"tid": thread_id}
         )
+
