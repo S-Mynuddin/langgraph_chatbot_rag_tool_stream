@@ -29,86 +29,115 @@ from langgraph.checkpoint.postgres import PostgresSaver
 load_dotenv()
 
 # ************************************************************************
-# ==================== Streamlit-safe secrets ====================
+# ==================== Streamlit-safe secrets (Improved) ====================
 try:
     import streamlit as st
-except Exception:
+    has_streamlit = True
+except ImportError:
+    has_streamlit = False
     st = None
 
 def get_secret(name: str) -> Optional[str]:
-    if st is not None:
+    """Get secret from Streamlit secrets (cloud) or environment variables (local)"""
+    # For cloud deployment
+    if has_streamlit and hasattr(st, 'secrets'):
         try:
             return st.secrets.get(name)
         except Exception:
             pass
+    
+    # For local development
     return os.getenv(name)
 
 
+# Get all required secrets
 GROQ_API_KEY = get_secret("GROQ_API_KEY")
 ALPHAVANTAGE_API_KEY = get_secret("ALPHAVANTAGE_API_KEY")
+DATABASE_URL = get_secret("DATABASE_URL")
 
-# ==================== Safety checks (STEP 3) ====================
-if not GROQ_API_KEY:
-    raise RuntimeError(
-        "❌ GROQ_API_KEY is missing.\n"
-        "Add it in Streamlit Cloud → App → Settings → Secrets"
-    )
+# ==================== Safety checks with friendly error messages ====================
+if has_streamlit:
+    # In Streamlit cloud, show nice error messages
+    if not GROQ_API_KEY:
+        st.error("❌ GROQ_API_KEY is missing. Please add it to your Streamlit secrets.")
+        st.stop()
+    
+    if not DATABASE_URL:
+        st.error("❌ DATABASE_URL is missing. Please add it to your Streamlit secrets.")
+        st.stop()
+else:
+    # In local development, raise exceptions
+    if not GROQ_API_KEY:
+        raise RuntimeError("❌ GROQ_API_KEY is missing. Add it to .env file.")
+    
+    if not DATABASE_URL:
+        raise RuntimeError("❌ DATABASE_URL is missing. Add it to .env file.")
 
-if not ALPHAVANTAGE_API_KEY:
+if not ALPHAVANTAGE_API_KEY and has_streamlit:
+    st.warning("⚠️ ALPHAVANTAGE_API_KEY missing — stock price tool may fail.")
+elif not ALPHAVANTAGE_API_KEY:
     print("⚠️ ALPHAVANTAGE_API_KEY missing — stock tool may fail.")
 
 
-DATABASE_URL = get_secret("DATABASE_URL")
+# ==================== Database Engine with Connection Pool ====================
+engine = create_engine(
+    DATABASE_URL, 
+    pool_pre_ping=True,
+    pool_size=5,
+    max_overflow=10,
+    pool_recycle=3600  # Recycle connections after 1 hour
+)
 
-if not DATABASE_URL:
-    raise RuntimeError("❌ DATABASE_URL missing.")
+# ==================== Postgres Checkpointer (Fixed for Streamlit Cloud) ====================
 
-# Switch to psycopg v3 driver
-if DATABASE_URL.startswith("postgresql://"):
-    DATABASE_URL = DATABASE_URL.replace(
-        "postgresql://",
-        "postgresql+psycopg://",
-        1
-    )
-
-# Fix Supabase SSL parameter for psycopg v3
-if "sslmode=require" in DATABASE_URL:
-    DATABASE_URL = DATABASE_URL.replace(
-        "sslmode=require",
-        "ssl=require"
-    )
-
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
-
-
-
-if st is not None:
+if has_streamlit:
     @st.cache_resource(show_spinner=False)
     def get_checkpointer():
-        cm = PostgresSaver.from_conn_string(DATABASE_URL)
-        cp = cm.__enter__()
-
+        """Get or create the Postgres checkpointer with proper connection handling"""
         try:
-            cp.setup()
-        except Exception:
-            pass
-
-        return cp, cm
+            # Create connection pool
+            connection_kwargs = {
+                "autocommit": True,
+                "prepare_threshold": 0,
+            }
+            
+            # Initialize checkpointer
+            checkpointer = PostgresSaver.from_conn_string(
+                DATABASE_URL,
+                connection_kwargs=connection_kwargs
+            )
+            
+            # Setup tables if they don't exist
+            checkpointer.setup()
+            
+            return checkpointer
+            
+        except Exception as e:
+            st.error(f"Failed to connect to database: {str(e)}")
+            st.stop()
 else:
     def get_checkpointer():
-        cm = PostgresSaver.from_conn_string(DATABASE_URL)
-        cp = cm.__enter__()
-
+        """Fallback for non-Streamlit environments"""
         try:
-            cp.setup()
-        except Exception:
-            pass
+            connection_kwargs = {
+                "autocommit": True,
+                "prepare_threshold": 0,
+            }
+            
+            checkpointer = PostgresSaver.from_conn_string(
+                DATABASE_URL,
+                connection_kwargs=connection_kwargs
+            )
+            
+            checkpointer.setup()
+            return checkpointer
+            
+        except Exception as e:
+            print(f"Failed to connect to database: {str(e)}")
+            raise
 
-        return cp, cm
-
-
-checkpointer, checkpointer_cm = get_checkpointer()
-
+# Get the checkpointer (cached for Streamlit, regular for others)
+checkpointer = get_checkpointer()
 
 
 
@@ -566,15 +595,28 @@ chatbot = graph.compile(checkpointer=checkpointer)
 # Helpers
 # -------------------
 
+
 def retrieve_all_threads():
+    """Retrieve all unique thread IDs from checkpoints"""
     try:
+        # Check if table exists first
+        with engine.connect() as conn:
+            result = conn.execute(text("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = 'checkpoints'
+                );
+            """))
+            table_exists = result.scalar()
+            
+            if not table_exists:
+                return []
+        
+        # Now query the table
         query = text("""
-            SELECT
-                thread_id,
-                MAX((metadata->>'ts')::float) AS last_seen
+            SELECT DISTINCT thread_id
             FROM checkpoints
-            GROUP BY thread_id
-            ORDER BY last_seen DESC NULLS LAST
+            ORDER BY thread_id
         """)
 
         with engine.connect() as conn:
@@ -582,9 +624,10 @@ def retrieve_all_threads():
 
         return [row[0] for row in rows]
 
-    except Exception:
+    except Exception as e:
+        if has_streamlit:
+            print(f"Error retrieving threads: {str(e)}")
         return []
-
 
 def thread_document_metadata(thread_id: str = "") -> dict:
     return _load_global_meta() or {}
@@ -599,10 +642,3 @@ def delete_thread(thread_id: str):
             text("DELETE FROM checkpoints WHERE thread_id = :tid"),
             {"tid": thread_id}
         )
-
-
-
-
-
-
-
