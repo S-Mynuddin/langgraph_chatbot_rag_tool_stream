@@ -65,13 +65,6 @@ if not DATABASE_URL:
         "❌ DATABASE_URL missing. Add it to environment or Streamlit secrets."
     )
 
-# Force SQLAlchemy to use psycopg (v3)
-if DATABASE_URL.startswith("postgresql://"):
-    DATABASE_URL = DATABASE_URL.replace(
-        "postgresql://",
-        "postgresql+psycopg://",
-        1
-    )
 
 # Just create engine directly — DO NOT modify SSL
 engine = create_engine(
@@ -597,6 +590,7 @@ def delete_thread(thread_id: str):
             text("DELETE FROM checkpoints WHERE thread_id = :tid"),
             {"tid": thread_id}
         )
+
 
 
 
