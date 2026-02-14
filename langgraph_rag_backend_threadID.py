@@ -67,14 +67,14 @@ if not DATABASE_URL:
         "❌ DATABASE_URL missing. Add it to environment or Streamlit secrets."
     )
 
-if DATABASE_URL.startswith("postgresql://"):
-    DATABASE_URL = DATABASE_URL.replace(
-        "postgresql://",
-        "postgresql+psycopg://",
-        1
-    )
+# Clean Supabase URL
+clean_url = DATABASE_URL.split("?")[0]
 
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+engine = create_engine(
+    clean_url,
+    pool_pre_ping=True,
+    connect_args={"sslmode": "require"}
+)
 
 
 if st is not None:
@@ -594,4 +594,5 @@ def delete_thread(thread_id: str):
             text("DELETE FROM checkpoints WHERE thread_id = :tid"),
             {"tid": thread_id}
         )
+
 
