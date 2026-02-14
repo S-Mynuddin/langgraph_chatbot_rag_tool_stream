@@ -3,6 +3,7 @@ from __future__ import annotations
 from langgraph.graph import StateGraph, START, END
 from typing import TypedDict, Annotated, Any, Dict, Optional
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage,AIMessage
+
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
 from langchain_community.tools import DuckDuckGoSearchRun
@@ -17,10 +18,15 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
 import os
-import sqlite3
+
 import requests
 from threading import Lock
 
+from sqlalchemy import create_engine, text
+
+from langgraph.checkpoint.postgres import PostgresSaver
+
+load_dotenv()
 
 # ************************************************************************
 # ==================== Streamlit-safe secrets ====================
@@ -30,9 +36,13 @@ except Exception:
     st = None
 
 def get_secret(name: str) -> Optional[str]:
-    if st and hasattr(st, "secrets"):
-        return st.secrets.get(name)
+    if st is not None:
+        try:
+            return st.secrets.get(name)
+        except Exception:
+            pass
     return os.getenv(name)
+
 
 GROQ_API_KEY = get_secret("GROQ_API_KEY")
 ALPHAVANTAGE_API_KEY = get_secret("ALPHAVANTAGE_API_KEY")
@@ -46,6 +56,47 @@ if not GROQ_API_KEY:
 
 if not ALPHAVANTAGE_API_KEY:
     print("⚠️ ALPHAVANTAGE_API_KEY missing — stock tool may fail.")
+
+
+# ==================== Postgres Checkpointer ====================
+
+DATABASE_URL = get_secret("DATABASE_URL")
+
+if not DATABASE_URL:
+    raise RuntimeError(
+        "❌ DATABASE_URL missing. Add it to environment or Streamlit secrets."
+    )
+
+engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+
+if st is not None:
+    @st.cache_resource(show_spinner=False)
+    def get_checkpointer():
+        cm = PostgresSaver.from_conn_string(DATABASE_URL)
+        cp = cm.__enter__()
+
+        try:
+            cp.setup()
+        except Exception:
+            pass
+
+        return cp, cm
+else:
+    def get_checkpointer():
+        cm = PostgresSaver.from_conn_string(DATABASE_URL)
+        cp = cm.__enter__()
+
+        try:
+            cp.setup()
+        except Exception:
+            pass
+
+        return cp, cm
+
+
+checkpointer, checkpointer_cm = get_checkpointer()
+
+
 
 
 
@@ -447,26 +498,15 @@ def final_answer(state: ChatState, config=None):
         )
 
     return {"messages": [llm.invoke(msgs, config=config)]}
-
 # -------------------
 # Checkpointer
-# -------------------
 # -------------------
 # -------------------
 # Checkpointer (LOCAL = SQLite, CLOUD = Memory)
 # -------------------
 
-USE_SQLITE = os.getenv("USE_SQLITE", "false").lower() == "true"
 
-if USE_SQLITE:
-    # Local development (persistent)
-    from langgraph.checkpoint.sqlite import SqliteSaver
-    conn = sqlite3.connect("chatbot.db", check_same_thread=False)
-    checkpointer = SqliteSaver(conn=conn)
-else:
-    # Streamlit Cloud (safe, stateless)
-    from langgraph.checkpoint.memory import MemorySaver
-    checkpointer = MemorySaver()
+
 
 # -------------------
 # Graph
@@ -514,40 +554,35 @@ chatbot = graph.compile(checkpointer=checkpointer)
 # -------------------
 
 def retrieve_all_threads():
-    if not USE_SQLITE:
-        return []  # Cloud: no persistence
-
-    with sqlite3.connect("chatbot.db", check_same_thread=False) as conn:
-        cur = conn.cursor()
-        cur.execute("""
+    try:
+        query = text("""
             SELECT
                 thread_id,
-                COALESCE(
-                    MAX(created_at),
-                    MAX(CAST(json_extract(metadata, '$.ts') AS REAL)),
-                    0
-                ) AS last_seen
+                MAX((metadata->>'ts')::float) AS last_seen
             FROM checkpoints
             GROUP BY thread_id
-            ORDER BY last_seen DESC
+            ORDER BY last_seen DESC NULLS LAST
         """)
-        rows = cur.fetchall()
 
-    return [thread_id for thread_id, _ in rows]
+        with engine.connect() as conn:
+            rows = conn.execute(query).fetchall()
+
+        return [row[0] for row in rows]
+
+    except Exception:
+        return []
 
 
 def thread_document_metadata(thread_id: str = "") -> dict:
     return _load_global_meta() or {}
 
+
 def delete_thread(thread_id: str):
-    if not USE_SQLITE:
-        return  # Cloud: nothing to delete
-
-    with sqlite3.connect("chatbot.db", check_same_thread=False) as conn:
-        cur = conn.cursor()
-        cur.execute(
-            "DELETE FROM checkpoints WHERE thread_id = ?",
-            (thread_id,)
+    """
+    Delete all checkpoints for a given thread_id (Postgres).
+    """
+    with engine.begin() as conn:
+        conn.execute(
+            text("DELETE FROM checkpoints WHERE thread_id = :tid"),
+            {"tid": thread_id}
         )
-        conn.commit()
-
