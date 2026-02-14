@@ -21,6 +21,5 @@ python-dotenv==1.2.1
 
 pydantic==2.12.5
 
-# 👇 ADD THESE
-psycopg2-binary==2.9.9
 SQLAlchemy==2.0.30
+psycopg[binary]==3.1.18
