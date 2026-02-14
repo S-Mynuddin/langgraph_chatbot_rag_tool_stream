@@ -66,11 +66,15 @@ if not DATABASE_URL:
     )
 
 
-# Just create engine directly — DO NOT modify SSL
-engine = create_engine(
-    DATABASE_URL,
-    pool_pre_ping=True
-)
+# Force SQLAlchemy to use psycopg v3 driver
+if DATABASE_URL.startswith("postgresql://"):
+    DATABASE_URL = DATABASE_URL.replace(
+        "postgresql://",
+        "postgresql+psycopg://",
+        1
+    )
+
+engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 
 
 if st is not None:
@@ -590,6 +594,7 @@ def delete_thread(thread_id: str):
             text("DELETE FROM checkpoints WHERE thread_id = :tid"),
             {"tid": thread_id}
         )
+
 
 
 
