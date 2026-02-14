@@ -60,6 +60,8 @@ if not ALPHAVANTAGE_API_KEY:
 
 # ==================== Postgres Checkpointer ====================
 
+# ==================== Postgres Checkpointer ====================
+
 DATABASE_URL = get_secret("DATABASE_URL")
 
 if not DATABASE_URL:
@@ -67,7 +69,15 @@ if not DATABASE_URL:
         "❌ DATABASE_URL missing. Add it to environment or Streamlit secrets."
     )
 
-# Clean Supabase URL
+# Force SQLAlchemy to use psycopg (v3)
+if DATABASE_URL.startswith("postgresql://"):
+    DATABASE_URL = DATABASE_URL.replace(
+        "postgresql://",
+        "postgresql+psycopg://",
+        1
+    )
+
+# Remove ?sslmode=require if present
 clean_url = DATABASE_URL.split("?")[0]
 
 engine = create_engine(
@@ -75,6 +85,7 @@ engine = create_engine(
     pool_pre_ping=True,
     connect_args={"sslmode": "require"}
 )
+
 
 
 if st is not None:
@@ -594,5 +605,6 @@ def delete_thread(thread_id: str):
             text("DELETE FROM checkpoints WHERE thread_id = :tid"),
             {"tid": thread_id}
         )
+
 
 
