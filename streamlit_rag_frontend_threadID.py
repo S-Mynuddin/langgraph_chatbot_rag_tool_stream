@@ -66,7 +66,7 @@ selected_thread = None
 
 # ============================ Sidebar ============================
 
-st.sidebar.title("LangGraph PDF Chatbot")
+st.sidebar.title("RAG + Tools AI Chat")
 st.sidebar.markdown(f"**Active chat**")
 
 if st.sidebar.button("New Chat", use_container_width=True):
@@ -111,7 +111,7 @@ else:
     st.sidebar.info("No PDF indexed yet.")
 
 
-st.sidebar.subheader("Past conversations")
+st.sidebar.subheader("Conversation History")
 
 if not threads:
     st.sidebar.write("No past conversations yet.")
@@ -144,7 +144,7 @@ else:
                 st.rerun()
 
 # ============================ Main UI ============================
-st.title("Multi Utility Chatbot")
+st.title("Multi-Agent AI Assistant")
 
 # Chat area
 for message in st.session_state["message_history"]:
@@ -264,5 +264,6 @@ if selected_thread:
     st.session_state["message_history"] = temp_messages
     
     st.rerun()
+
 
 
